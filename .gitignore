@@ -1,0 +1,23 @@
+# Backend (Spring Boot)
+backend/target/
+backend/.mvn/wrapper/maven-wrapper.jar
+backend/src/main/resources/application-local.properties
+
+# Frontend (React)
+frontend/node_modules/
+frontend/dist/
+
+# IntelliJ / editores
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+
+# Postman (configuración local de cada quien)
+.postman/
+
+# Sistema
+.DS_Store
+Thumbs.db
+*.log

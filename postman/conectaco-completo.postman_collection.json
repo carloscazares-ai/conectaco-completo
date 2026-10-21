@@ -1,0 +1,157 @@
+{
+  "info": {
+    "name": "conectaco-completo",
+    "description": "Pruebas de la API de conecTaco. Requiere el backend corriendo en localhost:8080 con los datos de ejemplo (turista 1 y negocio 1).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "idTurista", "value": "1" },
+    { "key": "idNegocio", "value": "1" }
+  ],
+  "item": [
+    {
+      "name": "Pruebas de clase",
+      "item": [
+        { "name": "GET hola", "request": { "method": "GET", "url": "{{baseUrl}}/test/hola" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "GET carlos", "request": { "method": "GET", "url": "{{baseUrl}}/test/carlos" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "GET yaretzi", "request": { "method": "GET", "url": "{{baseUrl}}/test/yaretzi" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "GET usuarios", "request": { "method": "GET", "url": "{{baseUrl}}/v1/usuarios" },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Nunca regresa contraseñas', () => pm.response.json().forEach(u => pm.expect(u).to.not.have.property('password')));"
+          ] } }] },
+        { "name": "POST usuario", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/v1/usuarios",
+            "body": { "mode": "raw", "raw": "{\n  \"nombre\": \"Usuario Postman\",\n  \"email\": \"postman{{$timestamp}}@test.com\",\n  \"password\": \"123456\",\n  \"tipoUsuario\": \"Turista\"\n}" } },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Se generó el id', () => pm.expect(pm.response.json().idUsuario).to.be.a('number'));"
+          ] } }] }
+      ]
+    },
+    {
+      "name": "Cuentas",
+      "item": [
+        { "name": "Login turista demo", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/v1/auth/login",
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"turista@conectaco.mx\",\n  \"password\": \"demo1234\"\n}" } },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Es turista', () => pm.expect(pm.response.json().tipoUsuario).to.eql('Turista'));",
+            "pm.collectionVariables.set('idTurista', pm.response.json().idTurista);"
+          ] } }] },
+        { "name": "Login negocio demo", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/v1/auth/login",
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"cafenin@conectaco.mx\",\n  \"password\": \"demo1234\"\n}" } },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Es negocio', () => pm.expect(pm.response.json().tipoUsuario).to.eql('Negocio'));",
+            "pm.collectionVariables.set('idNegocio', pm.response.json().idNegocio);"
+          ] } }] },
+        { "name": "Login con contraseña incorrecta", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/v1/auth/login",
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"turista@conectaco.mx\",\n  \"password\": \"mal\"\n}" } },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 401', () => pm.response.to.have.status(401));"] } }] },
+        { "name": "Registro turista", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/v1/auth/registro",
+            "body": { "mode": "raw", "raw": "{\n  \"nombre\": \"Turista Nuevo\",\n  \"email\": \"turista{{$timestamp}}@test.com\",\n  \"password\": \"123456\",\n  \"tipoUsuario\": \"Turista\"\n}" } },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status 201', () => pm.response.to.have.status(201));",
+            "pm.test('Tiene idTurista', () => pm.expect(pm.response.json().idTurista).to.be.a('number'));"
+          ] } }] }
+      ]
+    },
+    {
+      "name": "Lugares",
+      "item": [
+        { "name": "Categorías", "request": { "method": "GET", "url": "{{baseUrl}}/v1/categorias" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Hay categorías', () => pm.expect(pm.response.json()).to.not.be.empty);"] } }] },
+        { "name": "Lugares (todos)", "request": { "method": "GET", "url": "{{baseUrl}}/v1/lugares?idTurista={{idTurista}}" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Hay lugares', () => pm.expect(pm.response.json()).to.not.be.empty);"] } }] },
+        { "name": "Lugares buscando \"cafe\"", "request": { "method": "GET", "url": "{{baseUrl}}/v1/lugares?q=cafe" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Encuentra Café Nin', () => pm.expect(pm.response.json().map(l => l.nombre)).to.include('Café Nin'));"] } }] },
+        { "name": "Detalle de lugar 1", "request": { "method": "GET", "url": "{{baseUrl}}/v1/lugares/1?idTurista={{idTurista}}" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "Actividades del lugar 1", "request": { "method": "GET", "url": "{{baseUrl}}/v1/lugares/1/misiones?idTurista={{idTurista}}" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "Opiniones del lugar 1", "request": { "method": "GET", "url": "{{baseUrl}}/v1/lugares/1/opiniones" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "Lugar que no existe", "request": { "method": "GET", "url": "{{baseUrl}}/v1/lugares/9999" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 404', () => pm.response.to.have.status(404));"] } }] },
+        { "name": "Promociones vigentes", "request": { "method": "GET", "url": "{{baseUrl}}/v1/promociones" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] }
+      ]
+    },
+    {
+      "name": "Turista",
+      "item": [
+        { "name": "Dashboard", "request": { "method": "GET", "url": "{{baseUrl}}/v1/turistas/{{idTurista}}/dashboard" },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Tiene XP y nivel', () => { const d = pm.response.json(); pm.expect(d.xp).to.be.a('number'); pm.expect(d.nivel).to.be.at.least(1); });"
+          ] } }] },
+        { "name": "Actividades disponibles", "request": { "method": "GET", "url": "{{baseUrl}}/v1/turistas/{{idTurista}}/misiones?filtro=disponibles" },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "const disponibles = pm.response.json(); if (disponibles.length) pm.collectionVariables.set('idMision', disponibles[0].idMision);"
+          ] } }] },
+        { "name": "Completar una actividad", "request": { "method": "POST", "url": "{{baseUrl}}/v1/turistas/{{idTurista}}/misiones/{{idMision}}/completar" },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Ganó XP', () => pm.expect(pm.response.json().xpGanada).to.be.above(0));"
+          ] } }] },
+        { "name": "Completarla otra vez (409)", "request": { "method": "POST", "url": "{{baseUrl}}/v1/turistas/{{idTurista}}/misiones/{{idMision}}/completar" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 409', () => pm.response.to.have.status(409));"] } }] },
+        { "name": "Guardar / quitar lugar 3", "request": { "method": "POST", "url": "{{baseUrl}}/v1/turistas/{{idTurista}}/favoritos/3" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "Favoritos", "request": { "method": "GET", "url": "{{baseUrl}}/v1/turistas/{{idTurista}}/favoritos" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "Mascota", "request": { "method": "GET", "url": "{{baseUrl}}/v1/turistas/{{idTurista}}/mascota" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "Alimentar mascota", "request": { "method": "POST", "url": "{{baseUrl}}/v1/turistas/{{idTurista}}/mascota/alimentar" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "Recompensas", "request": { "method": "GET", "url": "{{baseUrl}}/v1/turistas/{{idTurista}}/recompensas" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "Recuerdos", "request": { "method": "GET", "url": "{{baseUrl}}/v1/turistas/{{idTurista}}/recuerdos" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "Crear recuerdo", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/v1/turistas/{{idTurista}}/recuerdos",
+            "body": { "mode": "raw", "raw": "{\n  \"titulo\": \"Recuerdo desde Postman\",\n  \"resena\": \"Muy buen lugar\",\n  \"calificacion\": 5,\n  \"idLugar\": 5\n}" } },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 201', () => pm.response.to.have.status(201));"] } }] }
+      ]
+    },
+    {
+      "name": "Negocio",
+      "item": [
+        { "name": "Dashboard", "request": { "method": "GET", "url": "{{baseUrl}}/v1/negocios/{{idNegocio}}/dashboard" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "Mi establecimiento", "request": { "method": "GET", "url": "{{baseUrl}}/v1/negocios/{{idNegocio}}/lugar" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "Actividades", "request": { "method": "GET", "url": "{{baseUrl}}/v1/negocios/{{idNegocio}}/misiones" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "Crear actividad (borrador)", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/v1/negocios/{{idNegocio}}/misiones",
+            "body": { "mode": "raw", "raw": "{\n  \"nombre\": \"Trae a un amigo\",\n  \"descripcion\": \"Ven acompañado\",\n  \"tipo\": \"VISITA\",\n  \"puntosXp\": 120,\n  \"activa\": false\n}" } },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status 201', () => pm.response.to.have.status(201));",
+            "pm.collectionVariables.set('idMisionNueva', pm.response.json().idMision);"
+          ] } }] },
+        { "name": "Borrar esa actividad", "request": { "method": "DELETE", "url": "{{baseUrl}}/v1/negocios/{{idNegocio}}/misiones/{{idMisionNueva}}" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 204', () => pm.response.to.have.status(204));"] } }] },
+        { "name": "Promociones", "request": { "method": "GET", "url": "{{baseUrl}}/v1/negocios/{{idNegocio}}/promociones" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] },
+        { "name": "Estadísticas 30 días", "request": { "method": "GET", "url": "{{baseUrl}}/v1/negocios/{{idNegocio}}/estadisticas?dias=30" },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('Status 200', () => pm.response.to.have.status(200));",
+            "pm.test('Serie de 30 días', () => pm.expect(pm.response.json().serieVisitas).to.have.lengthOf(30));"
+          ] } }] },
+        { "name": "Perfil", "request": { "method": "GET", "url": "{{baseUrl}}/v1/negocios/{{idNegocio}}/perfil" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Status 200', () => pm.response.to.have.status(200));"] } }] }
+      ]
+    }
+  ]
+}
