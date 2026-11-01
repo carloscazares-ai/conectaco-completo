@@ -1,72 +1,88 @@
-import { useState } from 'react';
-import { Plus, Pencil, Trash2, Tag } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { api } from '../../lib/api.js';
-import { useApi } from '../../lib/useApi.js';
-import { useSesion } from '../../lib/sesion.jsx';
+import { obtenerSesion } from '../../lib/sesion.js';
 import { fecha, hoyISO } from '../../lib/formato.js';
-import { Estado, Imagen, Vacio } from '../../components/Piezas.jsx';
-import { useToast } from '../../components/Toast.jsx';
+import { Imagen, Vacio } from '../../components/Piezas.jsx';
+import Aviso from '../../components/Aviso.jsx';
 import Modal from '../../components/Modal.jsx';
 
-function enUnMes() {
-  const d = new Date();
-  d.setMonth(d.getMonth() + 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
+const PROMOCION_NUEVA = { titulo: '', descripcion: '', fechaFin: hoyISO(), activa: true, imagenUrl: '' };
 
-function EtiquetaEstado({ p }) {
-  if (p.vigente) return <span className="etiqueta etiqueta-verde">Activa</span>;
-  if (!p.activa) return <span className="etiqueta etiqueta-gris">Pausada</span>;
+// Etiqueta de color segun el estado de la promocion
+function Estado({ promocion }) {
+  if (promocion.vigente) {
+    return <span className="etiqueta etiqueta-verde">Activa</span>;
+  }
+  if (!promocion.activa) {
+    return <span className="etiqueta etiqueta-gris">Pausada</span>;
+  }
   return <span className="etiqueta etiqueta-roja">Vencida</span>;
 }
 
 export default function Promociones() {
-  const { sesion } = useSesion();
-  const avisar = useToast();
-  const base = `/negocios/${sesion.idNegocio}/promociones`;
-  const promociones = useApi(() => api.get(base), []);
+  const sesion = obtenerSesion();
+  const base = '/negocios/' + sesion.idNegocio + '/promociones';
+
+  const [promociones, setPromociones] = useState([]);
   const [editando, setEditando] = useState(null);
-  const [error, setError] = useState(null);
+  const [aviso, setAviso] = useState('');
+  const [error, setError] = useState('');
 
-  const guardar = async (e) => {
-    e.preventDefault();
-    setError(null);
-    const cuerpo = { ...editando, imagenUrl: editando.imagenUrl || null };
+  useEffect(() => {
+    cargar();
+  }, []);
+
+  async function cargar() {
     try {
-      if (editando.idPromocion) await api.put(`${base}/${editando.idPromocion}`, cuerpo);
-      else await api.post(base, cuerpo);
-      avisar(editando.idPromocion ? 'Promoción actualizada' : 'Promoción creada');
+      setPromociones(await api.get(base));
+    } catch (e) {
+      setAviso(e.message);
+    }
+  }
+
+  async function guardar(evento) {
+    evento.preventDefault();
+    setError('');
+    try {
+      if (editando.idPromocion) {
+        await api.put(base + '/' + editando.idPromocion, editando);
+      } else {
+        await api.post(base, editando);
+      }
       setEditando(null);
-      promociones.recargar();
-    } catch (err) {
-      setError(err.message);
+      setAviso('Promoción guardada');
+      cargar();
+    } catch (e) {
+      setError(e.message);
     }
-  };
+  }
 
-  const alternar = async (p) => {
+  async function pausarOActivar(promocion) {
     try {
-      await api.put(`${base}/${p.idPromocion}`, { ...p, activa: !p.activa });
-      promociones.recargar();
-    } catch (err) {
-      avisar(err.message, 'error');
+      await api.put(base + '/' + promocion.idPromocion, { ...promocion, activa: !promocion.activa });
+      cargar();
+    } catch (e) {
+      setAviso(e.message);
     }
-  };
+  }
 
-  const borrar = async (p) => {
-    if (!window.confirm(`¿Borrar la promoción "${p.titulo}"?`)) return;
+  async function borrar(promocion) {
+    if (!window.confirm('¿Borrar la promoción "' + promocion.titulo + '"?')) {
+      return;
+    }
     try {
-      await api.del(`${base}/${p.idPromocion}`);
-      avisar('Promoción borrada');
-      promociones.recargar();
-    } catch (err) {
-      avisar(err.message, 'error');
+      await api.del(base + '/' + promocion.idPromocion);
+      setAviso('Promoción borrada');
+      cargar();
+    } catch (e) {
+      setAviso(e.message);
     }
-  };
+  }
 
-  const nueva = () => {
-    setError(null);
-    setEditando({ titulo: '', descripcion: '', fechaFin: enUnMes(), activa: true, imagenUrl: '' });
-  };
+  function cambiar(campo, valor) {
+    setEditando({ ...editando, [campo]: valor });
+  }
 
   return (
     <div className="pagina">
@@ -75,73 +91,59 @@ export default function Promociones() {
           <h1>Promociones</h1>
           <p>Las promociones activas aparecen en el inicio de los turistas.</p>
         </div>
-        <button className="btn btn-primario" onClick={nueva}><Plus size={18} /> Crear promoción</button>
+        <button className="btn btn-primario" onClick={() => setEditando(PROMOCION_NUEVA)}><Plus size={18} /> Crear promoción</button>
       </div>
 
-      {!promociones.datos && <Estado cargando={promociones.cargando} error={promociones.error} onReintentar={promociones.recargar} />}
-      {promociones.datos?.length === 0 && (
-        <div className="tarjeta"><Vacio icono={Tag} titulo="Aún no tienes promociones">
-          <button className="btn btn-primario btn-chico" onClick={nueva}>Crear la primera</button>
-        </Vacio></div>
-      )}
+      {promociones.length === 0 && <div className="tarjeta"><Vacio titulo="Aún no tienes promociones" /></div>}
+
       <div className="grid-recuerdos">
-        {promociones.datos?.map((p) => (
-          <article key={p.idPromocion} className="tarjeta recuerdo" style={{ overflow: 'hidden' }}>
-            <Imagen src={p.imagenUrl} alt={p.titulo} />
-            <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {promociones.map((promocion) => (
+          <article key={promocion.idPromocion} className="tarjeta recuerdo">
+            <Imagen src={promocion.imagenUrl} alt={promocion.titulo} />
+            <div className="tarjeta-pad form" style={{ gap: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                <h3 style={{ fontSize: 17, fontWeight: 800 }}>{p.titulo}</h3>
-                <EtiquetaEstado p={p} />
+                <h3>{promocion.titulo}</h3>
+                <Estado promocion={promocion} />
               </div>
-              {p.descripcion && <p className="texto-suave">{p.descripcion}</p>}
-              <span className="texto-tenue">Válido hasta {fecha(p.fechaFin)}</span>
-              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                <button className="btn btn-suave btn-chico" style={{ flex: 1 }} onClick={() => alternar(p)}>{p.activa ? 'Pausar' : 'Activar'}</button>
-                <button className="btn btn-icono" aria-label="Editar" onClick={() => { setError(null); setEditando({ ...p, imagenUrl: p.imagenUrl ?? '' }); }}><Pencil size={16} /></button>
-                <button className="btn btn-icono" aria-label="Borrar" onClick={() => borrar(p)}><Trash2 size={16} /></button>
+              <p className="texto-suave">{promocion.descripcion}</p>
+              <span className="texto-tenue">Válido hasta {fecha(promocion.fechaFin)}</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-suave btn-chico" style={{ flex: 1 }} onClick={() => pausarOActivar(promocion)}>
+                  {promocion.activa ? 'Pausar' : 'Activar'}
+                </button>
+                <button className="btn btn-icono" onClick={() => setEditando(promocion)}><Pencil size={16} /></button>
+                <button className="btn btn-icono" onClick={() => borrar(promocion)}><Trash2 size={16} /></button>
               </div>
             </div>
           </article>
         ))}
       </div>
 
-      {editando && (
-        <Modal titulo={editando.idPromocion ? 'Editar promoción' : 'Crear promoción'} onCerrar={() => setEditando(null)}>
+      {editando !== null && (
+        <Modal titulo="Promoción" onCerrar={() => setEditando(null)}>
           <form className="form" onSubmit={guardar}>
-            {error && <div className="error-form">{error}</div>}
+            {error !== '' && <div className="error-form">{error}</div>}
+
             <label className="campo">
               <span>Título</span>
-              <input className="input" required maxLength={100} value={editando.titulo} placeholder="2x1 en café"
-                     onChange={(e) => setEditando({ ...editando, titulo: e.target.value })} />
+              <input className="input" required value={editando.titulo} onChange={(e) => cambiar('titulo', e.target.value)} />
             </label>
             <label className="campo">
               <span>Descripción</span>
-              <textarea className="textarea" maxLength={255} value={editando.descripcion ?? ''}
-                        onChange={(e) => setEditando({ ...editando, descripcion: e.target.value })} />
+              <textarea className="textarea" value={editando.descripcion} onChange={(e) => cambiar('descripcion', e.target.value)} />
             </label>
-            <div className="form-fila">
-              <label className="campo">
-                <span>Válida hasta</span>
-                <input className="input" type="date" required min={hoyISO()} value={editando.fechaFin}
-                       onChange={(e) => setEditando({ ...editando, fechaFin: e.target.value })} />
-              </label>
-              <label className="campo">
-                <span>URL de imagen (opcional)</span>
-                <input className="input" type="url" value={editando.imagenUrl} placeholder="https://…"
-                       onChange={(e) => setEditando({ ...editando, imagenUrl: e.target.value })} />
-              </label>
-            </div>
-            <label style={{ display: 'flex', gap: 10, alignItems: 'center', fontWeight: 600 }}>
-              <input type="checkbox" checked={editando.activa} onChange={(e) => setEditando({ ...editando, activa: e.target.checked })} />
-              Activa
+            <label className="campo">
+              <span>Válida hasta</span>
+              <input className="input" type="date" required value={editando.fechaFin} onChange={(e) => cambiar('fechaFin', e.target.value)} />
             </label>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button type="button" className="btn btn-suave" onClick={() => setEditando(null)}>Cancelar</button>
-              <button className="btn btn-primario">Guardar</button>
-            </div>
+            <label>
+              <input type="checkbox" checked={editando.activa} onChange={(e) => cambiar('activa', e.target.checked)} /> Activa
+            </label>
+            <button className="btn btn-primario">Guardar</button>
           </form>
         </Modal>
       )}
+      <Aviso texto={aviso} onCerrar={() => setAviso('')} />
     </div>
   );
 }

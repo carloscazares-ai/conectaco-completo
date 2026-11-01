@@ -15,7 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 public class NegocioServiceImpl implements NegocioService {
@@ -62,30 +63,37 @@ public class NegocioServiceImpl implements NegocioService {
     @Override
     public NegocioDashboardDTO dashboard(Integer idNegocio) {
         NegocioEntity negocio = buscarNegocio(idNegocio);
-        String nombre = nombreDe(negocio);
-        Optional<LugarEntity> lugar = lugarRepository.findFirstByIdNegocio(idNegocio);
-        if (lugar.isEmpty()) {
-            return new NegocioDashboardDTO(nombre, null, 0, 0, 0, serieVisitas(null, 30));
+        String nombre = nombreDelNegocio(negocio);
+        LugarEntity lugar = lugarDelNegocio(idNegocio);
+
+        // Negocio recien registrado: todavia no tiene establecimiento
+        if (lugar == null) {
+            return new NegocioDashboardDTO(nombre, null, 0, 0, 0, visitasPorDia(null, 30));
         }
-        Integer idLugar = lugar.get().getIdLugar();
-        return new NegocioDashboardDTO(nombre, lugarService.toDTO(lugar.get(), null),
+
+        Integer idLugar = lugar.getIdLugar();
+        return new NegocioDashboardDTO(nombre, lugarService.toDTO(lugar, null),
                 visitaRepository.countByIdLugar(idLugar), misionRepository.findByIdLugar(idLugar).size(),
-                favoritoRepository.countByIdLugar(idLugar), serieVisitas(idLugar, 30));
+                favoritoRepository.countByIdLugar(idLugar), visitasPorDia(idLugar, 30));
     }
 
     @Override
     public LugarDTO lugar(Integer idNegocio) {
         buscarNegocio(idNegocio);
-        return lugarRepository.findFirstByIdNegocio(idNegocio)
-                .map(l -> lugarService.toDTO(l, null))
-                .orElse(null);
+
+        LugarEntity lugar = lugarDelNegocio(idNegocio);
+        if (lugar == null) {
+            return null;
+        }
+        return lugarService.toDTO(lugar, null);
     }
 
-    // Crea el establecimiento la primera vez y despues lo actualiza
+    // La primera vez crea el establecimiento; despues lo actualiza
     @Override
     @Transactional
     public LugarDTO guardarLugar(Integer idNegocio, LugarRequest request) {
-        NegocioEntity negocio = buscarNegocio(idNegocio);
+        buscarNegocio(idNegocio);
+
         if (request.nombre() == null || request.nombre().isBlank()) {
             throw ApiException.peticionInvalida("El nombre del establecimiento es obligatorio");
         }
@@ -96,18 +104,31 @@ public class NegocioServiceImpl implements NegocioService {
             throw ApiException.peticionInvalida("Elige una categoria valida");
         }
 
-        LugarEntity lugar = lugarRepository.findFirstByIdNegocio(idNegocio).orElseGet(() -> {
-            LugarEntity nuevo = new LugarEntity();
-            nuevo.setIdNegocio(negocio.getIdNegocio());
-            nuevo.setCalificacionPromedio(0.0);
-            return nuevo;
-        });
+        LugarEntity lugar = lugarDelNegocio(idNegocio);
+        if (lugar == null) {
+            lugar = new LugarEntity();
+            lugar.setIdNegocio(idNegocio);
+            lugar.setCalificacionPromedio(0.0);
+        }
         lugarMapper.copiar(request, lugar);
-        if (lugar.getDescripcion() == null) lugar.setDescripcion("");
-        if (lugar.getHorario() == null || lugar.getHorario().isBlank()) lugar.setHorario("Por definir");
-        if (lugar.getCosto() == null || lugar.getCosto().isBlank()) lugar.setCosto("$$");
-        if (lugar.getLatitud() == null) lugar.setLatitud(LATITUD_CDMX);
-        if (lugar.getLongitud() == null) lugar.setLongitud(LONGITUD_CDMX);
+
+        // Valores por default para lo que el negocio deje vacio
+        if (lugar.getDescripcion() == null) {
+            lugar.setDescripcion("");
+        }
+        if (lugar.getHorario() == null || lugar.getHorario().isBlank()) {
+            lugar.setHorario("Por definir");
+        }
+        if (lugar.getCosto() == null || lugar.getCosto().isBlank()) {
+            lugar.setCosto("$$");
+        }
+        if (lugar.getLatitud() == null) {
+            lugar.setLatitud(LATITUD_CDMX);
+        }
+        if (lugar.getLongitud() == null) {
+            lugar.setLongitud(LONGITUD_CDMX);
+        }
+
         lugar = lugarRepository.save(lugar);
         return lugarService.toDTO(lugar, null);
     }
@@ -115,11 +136,12 @@ public class NegocioServiceImpl implements NegocioService {
     @Override
     public List<MisionDTO> misiones(Integer idNegocio) {
         buscarNegocio(idNegocio);
-        Optional<LugarEntity> lugar = lugarRepository.findFirstByIdNegocio(idNegocio);
+
         List<MisionDTO> misiones = new ArrayList<>();
-        if (lugar.isPresent()) {
-            for (MisionEntity mision : misionRepository.findByIdLugar(lugar.get().getIdLugar())) {
-                misiones.add(misionMapper.toMisionDTO(mision, lugar.get().getNombre(), null));
+        LugarEntity lugar = lugarDelNegocio(idNegocio);
+        if (lugar != null) {
+            for (MisionEntity mision : misionRepository.findByIdLugar(lugar.getIdLugar())) {
+                misiones.add(misionMapper.toMisionDTO(mision, lugar.getNombre(), null));
             }
         }
         return misiones;
@@ -129,12 +151,17 @@ public class NegocioServiceImpl implements NegocioService {
     @Transactional
     public MisionDTO crearMision(Integer idNegocio, MisionRequest request) {
         buscarNegocio(idNegocio);
-        LugarEntity lugar = lugarRepository.findFirstByIdNegocio(idNegocio)
-                .orElseThrow(() -> ApiException.peticionInvalida("Primero registra tu establecimiento en \"Mi establecimiento\""));
+
+        LugarEntity lugar = lugarDelNegocio(idNegocio);
+        if (lugar == null) {
+            throw ApiException.peticionInvalida("Primero registra tu establecimiento en \"Mi establecimiento\"");
+        }
+
         MisionEntity mision = new MisionEntity();
         mision.setIdLugar(lugar.getIdLugar());
         copiarMision(request, mision);
         mision = misionRepository.save(mision);
+
         return misionMapper.toMisionDTO(mision, lugar.getNombre(), null);
     }
 
@@ -144,8 +171,9 @@ public class NegocioServiceImpl implements NegocioService {
         MisionEntity mision = buscarMisionDelNegocio(idNegocio, idMision);
         copiarMision(request, mision);
         mision = misionRepository.save(mision);
-        String lugar = lugarRepository.findById(mision.getIdLugar()).map(LugarEntity::getNombre).orElse("");
-        return misionMapper.toMisionDTO(mision, lugar, null);
+
+        String nombreLugar = lugarService.buscar(mision.getIdLugar()).getNombre();
+        return misionMapper.toMisionDTO(mision, nombreLugar, null);
     }
 
     @Override
@@ -157,6 +185,7 @@ public class NegocioServiceImpl implements NegocioService {
     @Override
     public List<PromocionDTO> promociones(Integer idNegocio) {
         NegocioEntity negocio = buscarNegocio(idNegocio);
+
         List<PromocionDTO> promociones = new ArrayList<>();
         for (PromocionEntity promocion : promocionRepository.findByIdNegocioOrderByFechaFinAsc(idNegocio)) {
             promociones.add(toPromocionDTO(promocion, negocio));
@@ -169,10 +198,13 @@ public class NegocioServiceImpl implements NegocioService {
     public PromocionDTO crearPromocion(Integer idNegocio, PromocionRequest request) {
         NegocioEntity negocio = buscarNegocio(idNegocio);
         validarPromocion(request);
+
         PromocionEntity promocion = new PromocionEntity();
         promocion.setIdNegocio(idNegocio);
         promocionMapper.copiar(request, promocion);
-        return toPromocionDTO(promocionRepository.save(promocion), negocio);
+        promocion = promocionRepository.save(promocion);
+
+        return toPromocionDTO(promocion, negocio);
     }
 
     @Override
@@ -180,9 +212,12 @@ public class NegocioServiceImpl implements NegocioService {
     public PromocionDTO actualizarPromocion(Integer idNegocio, Integer idPromocion, PromocionRequest request) {
         NegocioEntity negocio = buscarNegocio(idNegocio);
         validarPromocion(request);
+
         PromocionEntity promocion = buscarPromocionDelNegocio(idNegocio, idPromocion);
         promocionMapper.copiar(request, promocion);
-        return toPromocionDTO(promocionRepository.save(promocion), negocio);
+        promocion = promocionRepository.save(promocion);
+
+        return toPromocionDTO(promocion, negocio);
     }
 
     @Override
@@ -191,95 +226,121 @@ public class NegocioServiceImpl implements NegocioService {
         promocionRepository.delete(buscarPromocionDelNegocio(idNegocio, idPromocion));
     }
 
+    // Las promociones activas y sin vencer de todos los negocios (las ve el turista)
     @Override
     public List<PromocionDTO> promocionesVigentes() {
         List<PromocionDTO> promociones = new ArrayList<>();
-        for (PromocionEntity promocion : promocionRepository
-                .findByActivaTrueAndFechaFinGreaterThanEqualOrderByFechaFinAsc(LocalDate.now())) {
-            negocioRepository.findById(promocion.getIdNegocio())
-                    .ifPresent(negocio -> promociones.add(toPromocionDTO(promocion, negocio)));
+        LocalDate hoy = LocalDate.now();
+
+        for (PromocionEntity promocion : promocionRepository.findByActivaTrueAndFechaFinGreaterThanEqualOrderByFechaFinAsc(hoy)) {
+            NegocioEntity negocio = negocioRepository.findById(promocion.getIdNegocio()).orElse(null);
+            if (negocio != null) {
+                promociones.add(toPromocionDTO(promocion, negocio));
+            }
         }
         return promociones;
     }
 
+    // Compara los ultimos "dias" contra los mismos dias de antes.
+    // Ejemplo con dias = 30: ultimos 30 dias contra los 30 anteriores.
     @Override
     public EstadisticasDTO estadisticas(Integer idNegocio, int dias) {
         buscarNegocio(idNegocio);
         if (dias < 1 || dias > 365) {
             throw ApiException.peticionInvalida("Los dias deben ir de 1 a 365");
         }
-        Optional<LugarEntity> lugar = lugarRepository.findFirstByIdNegocio(idNegocio);
-        if (lugar.isEmpty()) {
-            return new EstadisticasDTO(dias, 0, null, 0, null, 0, null, serieVisitas(null, dias));
+
+        LugarEntity lugar = lugarDelNegocio(idNegocio);
+        if (lugar == null) {
+            return new EstadisticasDTO(dias, 0, null, 0, null, 0, null, visitasPorDia(null, dias));
         }
-        Integer idLugar = lugar.get().getIdLugar();
-        LocalDateTime hasta = LocalDate.now().plusDays(1).atStartOfDay();
-        LocalDateTime desde = hasta.minusDays(dias);
-        LocalDateTime antes = desde.minusDays(dias);
+        Integer idLugar = lugar.getIdLugar();
 
-        long visitas = visitaRepository.countByIdLugarAndFechaGreaterThanEqualAndFechaLessThan(idLugar, desde, hasta);
-        long visitasAntes = visitaRepository.countByIdLugarAndFechaGreaterThanEqualAndFechaLessThan(idLugar, antes, desde);
-        long completadas = progresoMisionRepository.contarCompletadasEnLugar(idLugar, EstadoMision.COMPLETADA, desde, hasta);
-        long completadasAntes = progresoMisionRepository.contarCompletadasEnLugar(idLugar, EstadoMision.COMPLETADA, antes, desde);
-        long seguidores = favoritoRepository.countByIdLugarAndFechaGreaterThanEqualAndFechaLessThan(idLugar, desde, hasta);
-        long seguidoresAntes = favoritoRepository.countByIdLugarAndFechaGreaterThanEqualAndFechaLessThan(idLugar, antes, desde);
+        LocalDateTime fin = LocalDate.now().plusDays(1).atStartOfDay();
+        LocalDateTime inicio = fin.minusDays(dias);
+        LocalDateTime inicioAnterior = inicio.minusDays(dias);
 
-        return new EstadisticasDTO(dias, visitas, cambio(visitas, visitasAntes), completadas,
-                cambio(completadas, completadasAntes), seguidores, cambio(seguidores, seguidoresAntes),
-                serieVisitas(idLugar, dias));
+        long visitas = visitaRepository.countByIdLugarAndFechaGreaterThanEqualAndFechaLessThan(idLugar, inicio, fin);
+        long visitasAntes = visitaRepository.countByIdLugarAndFechaGreaterThanEqualAndFechaLessThan(idLugar, inicioAnterior, inicio);
+
+        long completadas = progresoMisionRepository.contarCompletadasEnLugar(idLugar, EstadoMision.COMPLETADA, inicio, fin);
+        long completadasAntes = progresoMisionRepository.contarCompletadasEnLugar(idLugar, EstadoMision.COMPLETADA, inicioAnterior, inicio);
+
+        long seguidores = favoritoRepository.countByIdLugarAndFechaGreaterThanEqualAndFechaLessThan(idLugar, inicio, fin);
+        long seguidoresAntes = favoritoRepository.countByIdLugarAndFechaGreaterThanEqualAndFechaLessThan(idLugar, inicioAnterior, inicio);
+
+        return new EstadisticasDTO(dias, visitas, porcentajeDeCambio(visitas, visitasAntes),
+                completadas, porcentajeDeCambio(completadas, completadasAntes),
+                seguidores, porcentajeDeCambio(seguidores, seguidoresAntes),
+                visitasPorDia(idLugar, dias));
     }
 
     @Override
     public NegocioPerfilDTO perfil(Integer idNegocio) {
         NegocioEntity negocio = buscarNegocio(idNegocio);
         UsuarioEntity usuario = usuarioRepository.findById(negocio.getIdUsuario()).orElseThrow();
-        Optional<LugarEntity> lugar = lugarRepository.findFirstByIdNegocio(idNegocio);
-        String categoria = lugar.flatMap(l -> categoriaRepository.findById(l.getIdCategoria()))
-                .map(CategoriaEntity::getNombreCategoria).orElse(null);
+
+        // Datos que vienen del establecimiento (si ya lo registro)
+        String categoria = null;
+        String direccion = null;
+        String imagenUrl = null;
+        LugarEntity lugar = lugarDelNegocio(idNegocio);
+        if (lugar != null) {
+            direccion = lugar.getDireccion();
+            imagenUrl = lugar.getImagenUrl();
+            CategoriaEntity categoriaEntity = categoriaRepository.findById(lugar.getIdCategoria()).orElse(null);
+            if (categoriaEntity != null) {
+                categoria = categoriaEntity.getNombreCategoria();
+            }
+        }
+
         return new NegocioPerfilDTO(idNegocio, usuario.getNombre(), usuario.getEmail(), negocio.getRfc(),
                 negocio.getTelefono(), negocio.getHorario(), negocio.getEstadoVerificacion(), categoria,
-                lugar.map(LugarEntity::getDireccion).orElse(null), lugar.map(LugarEntity::getImagenUrl).orElse(null));
+                direccion, imagenUrl);
     }
 
     @Override
     @Transactional
     public NegocioPerfilDTO actualizarPerfil(Integer idNegocio, NegocioPerfilRequest request) {
         NegocioEntity negocio = buscarNegocio(idNegocio);
+
         if (request.nombre() != null && !request.nombre().isBlank()) {
             UsuarioEntity usuario = usuarioRepository.findById(negocio.getIdUsuario()).orElseThrow();
             usuario.setNombre(request.nombre().trim());
             usuarioRepository.save(usuario);
         }
+
         negocio.setRfc(request.rfc());
         negocio.setTelefono(request.telefono());
         negocio.setHorario(request.horario());
         negocioRepository.save(negocio);
+
         return perfil(idNegocio);
     }
 
-    // Una cuenta de visitas por dia, incluyendo los dias en cero, para dibujar la grafica
-    private List<PuntoSerieDTO> serieVisitas(Integer idLugar, int dias) {
-        LocalDate hoy = LocalDate.now();
-        LocalDate inicio = hoy.minusDays(dias - 1L);
-        Map<LocalDate, Long> porDia = new TreeMap<>();
-        for (LocalDate d = inicio; !d.isAfter(hoy); d = d.plusDays(1)) {
-            porDia.put(d, 0L);
-        }
-        if (idLugar != null) {
-            for (VisitaEntity visita : visitaRepository.findByIdLugarAndFechaGreaterThanEqual(idLugar, inicio.atStartOfDay())) {
-                porDia.merge(visita.getFecha().toLocalDate(), 1L, Long::sum);
-            }
-        }
+    // Una lista con las visitas de cada dia, para dibujar la grafica
+    private List<PuntoSerieDTO> visitasPorDia(Integer idLugar, int dias) {
         List<PuntoSerieDTO> serie = new ArrayList<>();
-        porDia.forEach((fecha, valor) -> serie.add(new PuntoSerieDTO(fecha, valor)));
+
+        for (int i = dias - 1; i >= 0; i--) {
+            LocalDate dia = LocalDate.now().minusDays(i);
+            long visitas = 0;
+            if (idLugar != null) {
+                visitas = visitaRepository.countByIdLugarAndFechaGreaterThanEqualAndFechaLessThan(
+                        idLugar, dia.atStartOfDay(), dia.plusDays(1).atStartOfDay());
+            }
+            serie.add(new PuntoSerieDTO(dia, visitas));
+        }
         return serie;
     }
 
-    private static Double cambio(long actual, long anterior) {
+    // Ejemplo: antes 100, ahora 150 => 50.0 (subio 50%). Si antes era 0 no se puede calcular.
+    private Double porcentajeDeCambio(long actual, long anterior) {
         if (anterior == 0) {
             return null;
         }
-        return Math.round((actual - anterior) * 1000.0 / anterior) / 10.0;
+        double porcentaje = (actual - anterior) * 100.0 / anterior;
+        return Math.round(porcentaje * 10) / 10.0;
     }
 
     private void copiarMision(MisionRequest request, MisionEntity mision) {
@@ -289,11 +350,29 @@ public class NegocioServiceImpl implements NegocioService {
         if (request.puntosXp() == null || request.puntosXp() < 10 || request.puntosXp() > 1000) {
             throw ApiException.peticionInvalida("Los puntos XP deben ir de 10 a 1000");
         }
+
         mision.setNombre(request.nombre().trim());
-        mision.setDescripcion(request.descripcion() == null ? "" : request.descripcion());
-        mision.setTipo(request.tipo() == null || request.tipo().isBlank() ? "OTRA" : request.tipo().toUpperCase());
+
+        if (request.descripcion() == null) {
+            mision.setDescripcion("");
+        } else {
+            mision.setDescripcion(request.descripcion());
+        }
+
+        if (request.tipo() == null || request.tipo().isBlank()) {
+            mision.setTipo("OTRA");
+        } else {
+            mision.setTipo(request.tipo().toUpperCase());
+        }
+
         mision.setPuntosXp(request.puntosXp());
-        mision.setActiva(request.activa() == null || request.activa());
+
+        // Si no dicen nada, se publica. activa = false la deja como borrador.
+        if (request.activa() == null) {
+            mision.setActiva(true);
+        } else {
+            mision.setActiva(request.activa());
+        }
     }
 
     private void validarPromocion(PromocionRequest request) {
@@ -306,30 +385,52 @@ public class NegocioServiceImpl implements NegocioService {
     }
 
     private PromocionDTO toPromocionDTO(PromocionEntity promocion, NegocioEntity negocio) {
-        Integer idLugar = lugarRepository.findFirstByIdNegocio(negocio.getIdNegocio())
-                .map(LugarEntity::getIdLugar).orElse(null);
-        return promocionMapper.toPromocionDTO(promocion, nombreDe(negocio), idLugar);
+        Integer idLugar = null;
+        LugarEntity lugar = lugarDelNegocio(negocio.getIdNegocio());
+        if (lugar != null) {
+            idLugar = lugar.getIdLugar();
+        }
+        return promocionMapper.toPromocionDTO(promocion, nombreDelNegocio(negocio), idLugar);
     }
 
-    private String nombreDe(NegocioEntity negocio) {
-        return usuarioRepository.findById(negocio.getIdUsuario()).map(UsuarioEntity::getNombre).orElse("");
+    private String nombreDelNegocio(NegocioEntity negocio) {
+        UsuarioEntity usuario = usuarioRepository.findById(negocio.getIdUsuario()).orElse(null);
+        if (usuario == null) {
+            return "";
+        }
+        return usuario.getNombre();
+    }
+
+    // Regresa el establecimiento del negocio, o null si todavia no lo registra
+    private LugarEntity lugarDelNegocio(Integer idNegocio) {
+        return lugarRepository.findFirstByIdNegocio(idNegocio).orElse(null);
     }
 
     private NegocioEntity buscarNegocio(Integer idNegocio) {
-        return negocioRepository.findById(idNegocio)
-                .orElseThrow(() -> ApiException.noEncontrado("No existe el negocio " + idNegocio));
+        NegocioEntity negocio = negocioRepository.findById(idNegocio).orElse(null);
+        if (negocio == null) {
+            throw ApiException.noEncontrado("No existe el negocio " + idNegocio);
+        }
+        return negocio;
     }
 
+    // Revisa que la actividad sea de este negocio (para que nadie edite las de otro)
     private MisionEntity buscarMisionDelNegocio(Integer idNegocio, Integer idMision) {
-        Integer idLugar = lugarRepository.findFirstByIdNegocio(idNegocio).map(LugarEntity::getIdLugar).orElse(null);
-        return misionRepository.findById(idMision)
-                .filter(m -> m.getIdLugar().equals(idLugar))
-                .orElseThrow(() -> ApiException.noEncontrado("Esa actividad no es de tu negocio"));
+        LugarEntity lugar = lugarDelNegocio(idNegocio);
+        MisionEntity mision = misionRepository.findById(idMision).orElse(null);
+
+        if (lugar == null || mision == null || !mision.getIdLugar().equals(lugar.getIdLugar())) {
+            throw ApiException.noEncontrado("Esa actividad no es de tu negocio");
+        }
+        return mision;
     }
 
     private PromocionEntity buscarPromocionDelNegocio(Integer idNegocio, Integer idPromocion) {
-        return promocionRepository.findById(idPromocion)
-                .filter(p -> p.getIdNegocio().equals(idNegocio))
-                .orElseThrow(() -> ApiException.noEncontrado("Esa promocion no es de tu negocio"));
+        PromocionEntity promocion = promocionRepository.findById(idPromocion).orElse(null);
+
+        if (promocion == null || !promocion.getIdNegocio().equals(idNegocio)) {
+            throw ApiException.noEncontrado("Esa promocion no es de tu negocio");
+        }
+        return promocion;
     }
 }

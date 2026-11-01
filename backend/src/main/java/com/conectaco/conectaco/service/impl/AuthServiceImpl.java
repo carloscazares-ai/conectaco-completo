@@ -39,10 +39,12 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public SesionDTO registrar(RegistroRequest request) {
-        return sesionDe(registrarUsuario(request));
+        UsuarioEntity usuario = registrarUsuario(request);
+        return crearSesion(usuario);
     }
 
-    // Crea el usuario y, segun su tipo, su registro de Turista (con mascota) o de Negocio.
+    // Guarda en Usuarios y luego, segun el tipo, en Turistas (con su mascota) o en Negocios.
+    // @Transactional: si algo falla a la mitad, no se guarda nada.
     @Override
     @Transactional
     public UsuarioEntity registrarUsuario(RegistroRequest request) {
@@ -98,17 +100,30 @@ public class AuthServiceImpl implements AuthService {
         if (request.email() == null || request.password() == null) {
             throw ApiException.peticionInvalida("Escribe tu email y tu contrasena");
         }
-        UsuarioEntity usuario = usuarioRepository.findByEmailIgnoreCase(request.email().trim())
-                .filter(u -> PasswordUtil.coincide(request.password(), u.getPassword()))
-                .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Email o contrasena incorrectos"));
-        return sesionDe(usuario);
+
+        // findBy... regresa un Optional; orElse(null) nos da el usuario, o null si no existe
+        UsuarioEntity usuario = usuarioRepository.findByEmailIgnoreCase(request.email().trim()).orElse(null);
+
+        if (usuario == null || !PasswordUtil.coincide(request.password(), usuario.getPassword())) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "Email o contrasena incorrectos");
+        }
+        return crearSesion(usuario);
     }
 
-    private SesionDTO sesionDe(UsuarioEntity usuario) {
-        Integer idTurista = turistaRepository.findByIdUsuario(usuario.getIdUsuario())
-                .map(TuristaEntity::getIdTurista).orElse(null);
-        Integer idNegocio = negocioRepository.findByIdUsuario(usuario.getIdUsuario())
-                .map(NegocioEntity::getIdNegocio).orElse(null);
+    // Arma lo que el frontend guarda para saber quien inicio sesion
+    private SesionDTO crearSesion(UsuarioEntity usuario) {
+        Integer idTurista = null;
+        Integer idNegocio = null;
+
+        TuristaEntity turista = turistaRepository.findByIdUsuario(usuario.getIdUsuario()).orElse(null);
+        if (turista != null) {
+            idTurista = turista.getIdTurista();
+        }
+        NegocioEntity negocio = negocioRepository.findByIdUsuario(usuario.getIdUsuario()).orElse(null);
+        if (negocio != null) {
+            idNegocio = negocio.getIdNegocio();
+        }
+
         return new SesionDTO(usuario.getIdUsuario(), usuario.getNombre(), usuario.getEmail(),
                 usuario.getTipoUsuario(), idTurista, idNegocio);
     }

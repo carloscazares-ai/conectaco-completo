@@ -1,34 +1,38 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { User, Store, Mail, Lock, ArrowLeft } from 'lucide-react';
+import { User, Mail, Lock, ArrowLeft } from 'lucide-react';
 import { Logo } from '../components/Layout.jsx';
 import { api } from '../lib/api.js';
-import { useSesion, rutaInicio } from '../lib/sesion.jsx';
+import { guardarSesion } from '../lib/sesion.js';
 
 export default function Registro() {
-  const [params] = useSearchParams();
-  const [tipo, setTipo] = useState(params.get('tipo') === 'Negocio' ? 'Negocio' : 'Turista');
-  const [form, setForm] = useState({ nombre: '', email: '', password: '' });
-  const [error, setError] = useState(null);
-  const [enviando, setEnviando] = useState(false);
-  const { iniciar } = useSesion();
+  // La URL dice el tipo de cuenta: /registro?tipo=Negocio
+  const [parametros] = useSearchParams();
+  const [tipo, setTipo] = useState(parametros.get('tipo') === 'Negocio' ? 'Negocio' : 'Turista');
+
+  const [nombre, setNombre] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  const cambiar = (campo) => (e) => setForm({ ...form, [campo]: e.target.value });
-
-  const enviar = async (e) => {
-    e.preventDefault();
-    setError(null);
-    setEnviando(true);
+  async function enviar(evento) {
+    evento.preventDefault();
+    setError('');
     try {
-      const sesion = await api.post('/auth/registro', { ...form, tipoUsuario: tipo });
-      iniciar(sesion);
-      navigate(tipo === 'Negocio' ? '/negocio/establecimiento' : rutaInicio(sesion));
-    } catch (err) {
-      setError(err.message);
-      setEnviando(false);
+      const sesion = await api.post('/auth/registro', { nombre, email, password, tipoUsuario: tipo });
+      guardarSesion(sesion);
+
+      // El negocio primero tiene que registrar su establecimiento
+      if (tipo === 'Negocio') {
+        navigate('/negocio/establecimiento');
+      } else {
+        navigate('/turista');
+      }
+    } catch (e) {
+      setError(e.message);
     }
-  };
+  }
 
   return (
     <div className="publica">
@@ -37,47 +41,47 @@ export default function Registro() {
       </header>
       <div className="centrado">
         <form className="tarjeta caja-auth form" onSubmit={enviar}>
-          <Link to="/tipo-de-cuenta" className="texto-suave" style={{ display: 'flex', gap: 6 }}><ArrowLeft size={18} /> Volver</Link>
+          <Link to="/tipo-de-cuenta" className="texto-suave"><ArrowLeft size={18} /> Volver</Link>
           <div>
             <h1>Crear cuenta</h1>
-            <p className="texto-suave">
-              {tipo === 'Negocio' ? 'Registra tu negocio y empieza a atraer visitantes.' : 'Empieza a explorar la Ciudad de México.'}
-            </p>
+            <p className="texto-suave">Empieza a usar conecTaco.</p>
           </div>
+
           <div className="tabs" style={{ width: '100%' }}>
-            {['Turista', 'Negocio'].map((t) => (
-              <button key={t} type="button" className={`tab ${tipo === t ? 'activo' : ''}`} style={{ flex: 1 }}
-                      onClick={() => setTipo(t)}>{t}</button>
-            ))}
+            <button type="button" className={tipo === 'Turista' ? 'tab activo' : 'tab'} style={{ flex: 1 }}
+                    onClick={() => setTipo('Turista')}>Turista</button>
+            <button type="button" className={tipo === 'Negocio' ? 'tab activo' : 'tab'} style={{ flex: 1 }}
+                    onClick={() => setTipo('Negocio')}>Negocio</button>
           </div>
-          {error && <div className="error-form">{error}</div>}
+
+          {error !== '' && <div className="error-form">{error}</div>}
+
           <label className="campo">
             <span>{tipo === 'Negocio' ? 'Nombre del negocio' : 'Nombre'}</span>
             <div className="input-icono">
-              {tipo === 'Negocio' ? <Store size={18} /> : <User size={18} />}
-              <input className="input" required value={form.nombre} onChange={cambiar('nombre')}
-                     placeholder={tipo === 'Negocio' ? 'Café Nin' : 'Tu nombre'} autoComplete="name" />
+              <User size={18} />
+              <input className="input" required value={nombre} onChange={(e) => setNombre(e.target.value)} />
             </div>
           </label>
           <label className="campo">
             <span>Correo electrónico</span>
             <div className="input-icono">
               <Mail size={18} />
-              <input className="input" type="email" required value={form.email} onChange={cambiar('email')}
-                     placeholder="tu@correo.com" autoComplete="email" />
+              <input className="input" type="email" required value={email}
+                     onChange={(e) => setEmail(e.target.value)} placeholder="tu@correo.com" />
             </div>
           </label>
           <label className="campo">
             <span>Contraseña</span>
             <div className="input-icono">
               <Lock size={18} />
-              <input className="input" type="password" required minLength={6} value={form.password}
-                     onChange={cambiar('password')} placeholder="Mínimo 6 caracteres" autoComplete="new-password" />
+              <input className="input" type="password" required minLength={6} value={password}
+                     onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
             </div>
           </label>
-          <button className="btn btn-primario btn-bloque" disabled={enviando}>
-            {enviando ? 'Creando cuenta…' : 'Crear cuenta'}
-          </button>
+
+          <button className="btn btn-primario btn-bloque">Crear cuenta</button>
+
           <p className="texto-suave" style={{ textAlign: 'center' }}>
             ¿Ya tienes cuenta? <Link to="/login" className="xp">Inicia sesión</Link>
           </p>

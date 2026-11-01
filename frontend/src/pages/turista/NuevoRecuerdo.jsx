@@ -1,84 +1,98 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../../lib/api.js';
-import { useApi } from '../../lib/useApi.js';
-import { useSesion } from '../../lib/sesion.jsx';
+import { obtenerSesion } from '../../lib/sesion.js';
 import { hoyISO } from '../../lib/formato.js';
-import { SelectorEstrellas } from '../../components/Piezas.jsx';
-import { useToast } from '../../components/Toast.jsx';
 import Modal from '../../components/Modal.jsx';
 
-// Formulario para guardar un recuerdo (su reseña aparece como opinión del lugar)
+// Ventana para crear un recuerdo. La usan Recuerdos y LugarDetalle.
 export default function NuevoRecuerdo({ idLugarInicial, onCerrar, onGuardado }) {
-  const { sesion } = useSesion();
-  const avisar = useToast();
-  const lugares = useApi(() => api.get('/lugares'), []);
-  const [form, setForm] = useState({
-    idLugar: idLugarInicial ?? '', titulo: '', resena: '', calificacion: 5, fecha: hoyISO(), imagenUrl: '', cancionUrl: '',
-  });
-  const [error, setError] = useState(null);
-  const [enviando, setEnviando] = useState(false);
-  const cambiar = (campo) => (e) => setForm({ ...form, [campo]: e.target.value });
+  const sesion = obtenerSesion();
+  const [lugares, setLugares] = useState([]);
+  const [error, setError] = useState('');
 
-  const guardar = async (e) => {
-    e.preventDefault();
-    setError(null);
-    setEnviando(true);
+  const [idLugar, setIdLugar] = useState(idLugarInicial || '');
+  const [titulo, setTitulo] = useState('');
+  const [resena, setResena] = useState('');
+  const [calificacion, setCalificacion] = useState(5);
+  const [dia, setDia] = useState(hoyISO());
+  const [imagenUrl, setImagenUrl] = useState('');
+  const [cancionUrl, setCancionUrl] = useState('');
+
+  useEffect(() => {
+    cargarLugares();
+  }, []);
+
+  async function cargarLugares() {
+    setLugares(await api.get('/lugares'));
+  }
+
+  async function guardar(evento) {
+    evento.preventDefault();
+    setError('');
     try {
-      const recuerdo = await api.post(`/turistas/${sesion.idTurista}/recuerdos`, {
-        ...form,
-        idLugar: Number(form.idLugar),
-        imagenUrl: form.imagenUrl || null,
-        cancionUrl: form.cancionUrl || null,
+      await api.post('/turistas/' + sesion.idTurista + '/recuerdos', {
+        idLugar: Number(idLugar),
+        titulo,
+        resena,
+        calificacion: Number(calificacion),
+        fecha: dia,
+        imagenUrl,
+        cancionUrl,
       });
-      avisar('Recuerdo guardado');
-      onGuardado(recuerdo);
-    } catch (err) {
-      setError(err.message);
-      setEnviando(false);
+      onGuardado();
+    } catch (e) {
+      setError(e.message);
     }
-  };
+  }
 
   return (
     <Modal titulo="Nuevo recuerdo" onCerrar={onCerrar}>
       <form className="form" onSubmit={guardar}>
-        {error && <div className="error-form">{error}</div>}
+        {error !== '' && <div className="error-form">{error}</div>}
+
         <label className="campo">
           <span>Lugar</span>
-          <select className="select" required value={form.idLugar} onChange={cambiar('idLugar')}>
-            <option value="" disabled>Elige un lugar</option>
-            {(lugares.datos ?? []).map((l) => <option key={l.idLugar} value={l.idLugar}>{l.nombre}</option>)}
+          <select className="select" required value={idLugar} onChange={(e) => setIdLugar(e.target.value)}>
+            <option value="">Elige un lugar</option>
+            {lugares.map((lugar) => (
+              <option key={lugar.idLugar} value={lugar.idLugar}>{lugar.nombre}</option>
+            ))}
           </select>
         </label>
         <label className="campo">
           <span>Título</span>
-          <input className="input" required maxLength={100} value={form.titulo} onChange={cambiar('titulo')} placeholder="Una tarde increíble" />
+          <input className="input" required value={titulo} onChange={(e) => setTitulo(e.target.value)} />
         </label>
         <label className="campo">
           <span>Reseña</span>
-          <textarea className="textarea" maxLength={500} value={form.resena} onChange={cambiar('resena')} placeholder="¿Qué te gustó de este lugar?" />
+          <textarea className="textarea" value={resena} onChange={(e) => setResena(e.target.value)} />
         </label>
         <div className="form-fila">
-          <div className="campo">
+          <label className="campo">
             <span>Calificación</span>
-            <SelectorEstrellas valor={form.calificacion} onCambiar={(n) => setForm({ ...form, calificacion: n })} />
-          </div>
+            <select className="select" value={calificacion} onChange={(e) => setCalificacion(e.target.value)}>
+              <option value="5">5 estrellas</option>
+              <option value="4">4 estrellas</option>
+              <option value="3">3 estrellas</option>
+              <option value="2">2 estrellas</option>
+              <option value="1">1 estrella</option>
+            </select>
+          </label>
           <label className="campo">
             <span>Fecha</span>
-            <input className="input" type="date" max={hoyISO()} value={form.fecha} onChange={cambiar('fecha')} />
+            <input className="input" type="date" value={dia} onChange={(e) => setDia(e.target.value)} />
           </label>
         </div>
         <label className="campo">
           <span>URL de una foto (opcional)</span>
-          <input className="input" type="url" value={form.imagenUrl} onChange={cambiar('imagenUrl')} placeholder="https://…" />
+          <input className="input" type="url" value={imagenUrl} onChange={(e) => setImagenUrl(e.target.value)} />
         </label>
         <label className="campo">
           <span>Canción del recuerdo (opcional)</span>
-          <input className="input" type="url" value={form.cancionUrl} onChange={cambiar('cancionUrl')} placeholder="https://open.spotify.com/…" />
+          <input className="input" type="url" value={cancionUrl} onChange={(e) => setCancionUrl(e.target.value)} />
         </label>
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-          <button type="button" className="btn btn-suave" onClick={onCerrar}>Cancelar</button>
-          <button className="btn btn-primario" disabled={enviando}>{enviando ? 'Guardando…' : 'Guardar recuerdo'}</button>
-        </div>
+
+        <button className="btn btn-primario">Guardar recuerdo</button>
       </form>
     </Modal>
   );

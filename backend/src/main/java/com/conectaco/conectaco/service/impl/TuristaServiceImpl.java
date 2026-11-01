@@ -17,12 +17,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 public class TuristaServiceImpl implements TuristaService {
 
     private static final int XP_CUIDAR_MASCOTA = 10;
+    private static final int LUGARES_RECOMENDADOS = 6;
 
     private final TuristaRepository turistaRepository;
     private final UsuarioRepository usuarioRepository;
@@ -67,11 +69,17 @@ public class TuristaServiceImpl implements TuristaService {
     @Override
     public TuristaDashboardDTO dashboard(Integer idTurista) {
         TuristaEntity turista = buscarTurista(idTurista);
-        String nombre = usuarioRepository.findById(turista.getIdUsuario()).map(UsuarioEntity::getNombre).orElse("");
 
+        String nombre = "";
+        UsuarioEntity usuario = usuarioRepository.findById(turista.getIdUsuario()).orElse(null);
+        if (usuario != null) {
+            nombre = usuario.getNombre();
+        }
+
+        // Los lugares mejor calificados
         List<LugarDTO> recomendados = new ArrayList<>();
         for (LugarEntity lugar : lugarRepository.findAllByOrderByCalificacionPromedioDesc()) {
-            if (recomendados.size() == 6) {
+            if (recomendados.size() == LUGARES_RECOMENDADOS) {
                 break;
             }
             recomendados.add(lugarService.toDTO(lugar, idTurista));
@@ -83,47 +91,50 @@ public class TuristaServiceImpl implements TuristaService {
                 negocioService.promocionesVigentes());
     }
 
+    // filtro: "todas", "disponibles" o "completadas"
     @Override
     public List<MisionDTO> misiones(Integer idTurista, String filtro) {
         buscarTurista(idTurista);
-        Map<Integer, ProgresoMisionEntity> progresos = new HashMap<>();
-        for (ProgresoMisionEntity progreso : progresoMisionRepository.findByIdTurista(idTurista)) {
-            progresos.put(progreso.getIdMision(), progreso);
-        }
 
-        String f = filtro == null ? "todas" : filtro.toLowerCase();
         List<MisionDTO> resultado = new ArrayList<>();
         for (MisionEntity mision : misionRepository.findByActivaTrue()) {
-            ProgresoMisionEntity progreso = progresos.get(mision.getIdMision());
+            ProgresoMisionEntity progreso = progresoMisionRepository
+                    .findByIdTuristaAndIdMision(idTurista, mision.getIdMision()).orElse(null);
             boolean completada = progreso != null && progreso.getEstado() == EstadoMision.COMPLETADA;
-            if ((f.equals("disponibles") && completada) || (f.equals("completadas") && !completada)) {
+
+            if ("disponibles".equals(filtro) && completada) {
                 continue;
             }
-            String lugar = lugarRepository.findById(mision.getIdLugar()).map(LugarEntity::getNombre).orElse("");
-            resultado.add(misionMapper.toMisionDTO(mision, lugar, progreso));
+            if ("completadas".equals(filtro) && !completada) {
+                continue;
+            }
+            resultado.add(misionMapper.toMisionDTO(mision, nombreDelLugar(mision.getIdLugar()), progreso));
         }
         return resultado;
     }
 
-    // Completar una mision suma sus XP al turista y a su mascota
+    // Completar una actividad le suma sus XP al turista y a su mascota
     @Override
     @Transactional
     public MisionCompletadaDTO completarMision(Integer idTurista, Integer idMision) {
         TuristaEntity turista = buscarTurista(idTurista);
-        MisionEntity mision = misionRepository.findById(idMision)
-                .orElseThrow(() -> ApiException.noEncontrado("No existe la actividad " + idMision));
-        if (!Boolean.TRUE.equals(mision.getActiva())) {
+
+        MisionEntity mision = misionRepository.findById(idMision).orElse(null);
+        if (mision == null) {
+            throw ApiException.noEncontrado("No existe la actividad " + idMision);
+        }
+        if (!mision.getActiva()) {
             throw ApiException.peticionInvalida("Esta actividad no esta disponible");
         }
 
-        ProgresoMisionEntity progreso = progresoMisionRepository.findByIdTuristaAndIdMision(idTurista, idMision)
-                .orElseGet(() -> {
-                    ProgresoMisionEntity nuevo = new ProgresoMisionEntity();
-                    nuevo.setIdTurista(idTurista);
-                    nuevo.setIdMision(idMision);
-                    nuevo.setFechaAsignacion(LocalDateTime.now());
-                    return nuevo;
-                });
+        // Si el turista nunca la habia empezado, se crea su progreso
+        ProgresoMisionEntity progreso = progresoMisionRepository.findByIdTuristaAndIdMision(idTurista, idMision).orElse(null);
+        if (progreso == null) {
+            progreso = new ProgresoMisionEntity();
+            progreso.setIdTurista(idTurista);
+            progreso.setIdMision(idMision);
+            progreso.setFechaAsignacion(LocalDateTime.now());
+        }
         if (progreso.getEstado() == EstadoMision.COMPLETADA) {
             throw ApiException.conflicto("Ya completaste esta actividad");
         }
@@ -131,40 +142,45 @@ public class TuristaServiceImpl implements TuristaService {
         progreso.setFechaCompletado(LocalDateTime.now());
         progreso = progresoMisionRepository.save(progreso);
 
+        // Sumarle los puntos al turista
         int nivelAnterior = turista.getNivel();
         int xp = turista.getPuntosExperiencia() + mision.getPuntosXp();
         turista.setPuntosExperiencia(xp);
         turista.setNivel(Niveles.nivel(xp));
         turistaRepository.save(turista);
 
-        mascotaRepository.findByIdTurista(idTurista).ifPresent(m -> sumarXpMascota(m, mision.getPuntosXp()));
+        // Y a su mascota
+        sumarXpMascota(buscarMascota(idTurista), mision.getPuntosXp());
 
-        String lugar = lugarRepository.findById(mision.getIdLugar()).map(LugarEntity::getNombre).orElse("");
-        return new MisionCompletadaDTO(misionMapper.toMisionDTO(mision, lugar, progreso), mision.getPuntosXp(),
-                xp, turista.getNivel(), turista.getNivel() > nivelAnterior);
+        boolean subioNivel = turista.getNivel() > nivelAnterior;
+        MisionDTO misionDTO = misionMapper.toMisionDTO(mision, nombreDelLugar(mision.getIdLugar()), progreso);
+        return new MisionCompletadaDTO(misionDTO, mision.getPuntosXp(), xp, turista.getNivel(), subioNivel);
     }
 
     @Override
     public List<LugarDTO> favoritos(Integer idTurista) {
         buscarTurista(idTurista);
+
         List<LugarDTO> lugares = new ArrayList<>();
         for (FavoritoEntity favorito : favoritoRepository.findByIdTurista(idTurista)) {
-            lugarRepository.findById(favorito.getIdLugar())
-                    .ifPresent(lugar -> lugares.add(lugarService.toDTO(lugar, idTurista)));
+            LugarEntity lugar = lugarService.buscar(favorito.getIdLugar());
+            lugares.add(lugarService.toDTO(lugar, idTurista));
         }
         return lugares;
     }
 
+    // Si ya estaba guardado lo quita; si no, lo guarda
     @Override
     @Transactional
     public LugarDTO alternarFavorito(Integer idTurista, Integer idLugar) {
         buscarTurista(idTurista);
         LugarEntity lugar = lugarService.buscar(idLugar);
-        Optional<FavoritoEntity> existente = favoritoRepository.findByIdTuristaAndIdLugar(idTurista, idLugar);
-        if (existente.isPresent()) {
-            favoritoRepository.delete(existente.get());
+
+        FavoritoEntity favorito = favoritoRepository.findByIdTuristaAndIdLugar(idTurista, idLugar).orElse(null);
+        if (favorito != null) {
+            favoritoRepository.delete(favorito);
         } else {
-            FavoritoEntity favorito = new FavoritoEntity();
+            favorito = new FavoritoEntity();
             favorito.setIdTurista(idTurista);
             favorito.setIdLugar(idLugar);
             favorito.setFecha(LocalDateTime.now());
@@ -176,19 +192,28 @@ public class TuristaServiceImpl implements TuristaService {
     @Override
     public MascotaDTO mascota(Integer idTurista) {
         MascotaEntity mascota = buscarMascota(idTurista);
-        String accesorio = mascota.getIdRecompensaEquipada() == null ? null
-                : recompensaRepository.findById(mascota.getIdRecompensaEquipada())
-                .map(RecompensaEntity::getNombre).orElse(null);
+
+        // Nombre del accesorio que trae puesto (si trae uno)
+        String accesorio = null;
+        if (mascota.getIdRecompensaEquipada() != null) {
+            RecompensaEntity recompensa = recompensaRepository.findById(mascota.getIdRecompensaEquipada()).orElse(null);
+            if (recompensa != null) {
+                accesorio = recompensa.getNombre();
+            }
+        }
         return mascotaMapper.toMascotaDTO(mascota, accesorio);
     }
 
+    // Sirve para cambiarle el nombre y para ponerle o quitarle un accesorio (0 = quitar)
     @Override
     @Transactional
     public MascotaDTO actualizarMascota(Integer idTurista, MascotaRequest request) {
         MascotaEntity mascota = buscarMascota(idTurista);
+
         if (request.nombre() != null && !request.nombre().isBlank()) {
             mascota.setNombre(request.nombre().trim());
         }
+
         Integer idRecompensa = request.idRecompensaEquipada();
         if (idRecompensa != null && idRecompensa == 0) {
             mascota.setIdRecompensaEquipada(null);
@@ -198,14 +223,16 @@ public class TuristaServiceImpl implements TuristaService {
             }
             mascota.setIdRecompensaEquipada(idRecompensa);
         }
+
         mascotaRepository.save(mascota);
         return mascota(idTurista);
     }
 
+    // accion: "alimentar" o "jugar"
     @Override
     @Transactional
     public MascotaDTO cuidarMascota(Integer idTurista, String accion) {
-        if (!"alimentar".equalsIgnoreCase(accion) && !"jugar".equalsIgnoreCase(accion)) {
+        if (!"alimentar".equals(accion) && !"jugar".equals(accion)) {
             throw ApiException.peticionInvalida("La accion debe ser alimentar o jugar");
         }
         sumarXpMascota(buscarMascota(idTurista), XP_CUIDAR_MASCOTA);
@@ -215,16 +242,13 @@ public class TuristaServiceImpl implements TuristaService {
     @Override
     public List<RecompensaDTO> recompensas(Integer idTurista) {
         TuristaEntity turista = buscarTurista(idTurista);
-        Integer equipada = buscarMascota(idTurista).getIdRecompensaEquipada();
-        Set<Integer> canjeadas = new HashSet<>();
-        for (InventarioEntity item : inventarioRepository.findByIdTurista(idTurista)) {
-            canjeadas.add(item.getIdRecompensa());
-        }
+        MascotaEntity mascota = buscarMascota(idTurista);
 
         List<RecompensaDTO> resultado = new ArrayList<>();
         for (RecompensaEntity recompensa : recompensaRepository.findAllByOrderByRequisitoXpAsc()) {
-            resultado.add(toRecompensaDTO(recompensa, turista, canjeadas.contains(recompensa.getIdRecompensa()),
-                    recompensa.getIdRecompensa().equals(equipada)));
+            boolean canjeada = inventarioRepository.existsByIdTuristaAndIdRecompensa(idTurista, recompensa.getIdRecompensa());
+            boolean equipada = recompensa.getIdRecompensa().equals(mascota.getIdRecompensaEquipada());
+            resultado.add(toRecompensaDTO(recompensa, turista, canjeada, equipada));
         }
         return resultado;
     }
@@ -233,28 +257,35 @@ public class TuristaServiceImpl implements TuristaService {
     @Transactional
     public RecompensaDTO canjearRecompensa(Integer idTurista, Integer idRecompensa) {
         TuristaEntity turista = buscarTurista(idTurista);
-        RecompensaEntity recompensa = recompensaRepository.findById(idRecompensa)
-                .orElseThrow(() -> ApiException.noEncontrado("No existe la recompensa " + idRecompensa));
+
+        RecompensaEntity recompensa = recompensaRepository.findById(idRecompensa).orElse(null);
+        if (recompensa == null) {
+            throw ApiException.noEncontrado("No existe la recompensa " + idRecompensa);
+        }
         if (turista.getPuntosExperiencia() < recompensa.getRequisitoXp()) {
-            throw ApiException.peticionInvalida("Te faltan "
-                    + (recompensa.getRequisitoXp() - turista.getPuntosExperiencia()) + " XP para esta recompensa");
+            int faltan = recompensa.getRequisitoXp() - turista.getPuntosExperiencia();
+            throw ApiException.peticionInvalida("Te faltan " + faltan + " XP para esta recompensa");
         }
         if (inventarioRepository.existsByIdTuristaAndIdRecompensa(idTurista, idRecompensa)) {
             throw ApiException.conflicto("Ya tienes esta recompensa");
         }
+
         InventarioEntity item = new InventarioEntity();
         item.setIdTurista(idTurista);
         item.setIdRecompensa(idRecompensa);
         item.setFechaCanje(LocalDate.now());
         item.setEstado(EstadoInventario.DISPONIBLE);
         inventarioRepository.save(item);
+
         return toRecompensaDTO(recompensa, turista, true, false);
     }
 
-    private RecompensaDTO toRecompensaDTO(RecompensaEntity r, TuristaEntity turista, boolean canjeada, boolean equipada) {
-        return new RecompensaDTO(r.getIdRecompensa(), r.getNombre(), r.getTipo(), r.getDescripcion(),
-                r.getImagenUrl(), r.getRequisitoXp(), turista.getPuntosExperiencia() >= r.getRequisitoXp(),
-                canjeada, equipada);
+    private RecompensaDTO toRecompensaDTO(RecompensaEntity recompensa, TuristaEntity turista,
+                                          boolean canjeada, boolean equipada) {
+        boolean desbloqueada = turista.getPuntosExperiencia() >= recompensa.getRequisitoXp();
+        return new RecompensaDTO(recompensa.getIdRecompensa(), recompensa.getNombre(), recompensa.getTipo(),
+                recompensa.getDescripcion(), recompensa.getImagenUrl(), recompensa.getRequisitoXp(),
+                desbloqueada, canjeada, equipada);
     }
 
     private void sumarXpMascota(MascotaEntity mascota, int xp) {
@@ -263,13 +294,23 @@ public class TuristaServiceImpl implements TuristaService {
         mascotaRepository.save(mascota);
     }
 
+    private String nombreDelLugar(Integer idLugar) {
+        return lugarService.buscar(idLugar).getNombre();
+    }
+
     private TuristaEntity buscarTurista(Integer idTurista) {
-        return turistaRepository.findById(idTurista)
-                .orElseThrow(() -> ApiException.noEncontrado("No existe el turista " + idTurista));
+        TuristaEntity turista = turistaRepository.findById(idTurista).orElse(null);
+        if (turista == null) {
+            throw ApiException.noEncontrado("No existe el turista " + idTurista);
+        }
+        return turista;
     }
 
     private MascotaEntity buscarMascota(Integer idTurista) {
-        return mascotaRepository.findByIdTurista(idTurista)
-                .orElseThrow(() -> ApiException.noEncontrado("El turista " + idTurista + " no tiene mascota"));
+        MascotaEntity mascota = mascotaRepository.findByIdTurista(idTurista).orElse(null);
+        if (mascota == null) {
+            throw ApiException.noEncontrado("El turista " + idTurista + " no tiene mascota");
+        }
+        return mascota;
     }
 }

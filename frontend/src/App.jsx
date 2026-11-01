@@ -1,5 +1,6 @@
+// Aqui se define que pagina se muestra en cada URL
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { useSesion, rutaInicio } from './lib/sesion.jsx';
+import { obtenerSesion, rutaInicio } from './lib/sesion.js';
 import Layout from './components/Layout.jsx';
 import Inicio from './pages/Inicio.jsx';
 import TipoCuenta from './pages/TipoCuenta.jsx';
@@ -19,18 +20,25 @@ import Promociones from './pages/negocio/Promociones.jsx';
 import Estadisticas from './pages/negocio/Estadisticas.jsx';
 import PerfilNegocio from './pages/negocio/Perfil.jsx';
 
-// Solo deja pasar a quien inició sesión con el tipo de cuenta correcto
+// Solo deja entrar a quien inicio sesion y tiene el tipo de cuenta correcto
 function Protegida({ tipo, children }) {
-  const { sesion } = useSesion();
-  if (!sesion) return <Navigate to="/login" replace />;
-  if (sesion.tipoUsuario !== tipo) return <Navigate to={rutaInicio(sesion)} replace />;
+  const sesion = obtenerSesion();
+  if (sesion === null) {
+    return <Navigate to="/login" />;
+  }
+  if (sesion.tipoUsuario !== tipo) {
+    return <Navigate to={rutaInicio(sesion)} />;
+  }
   return children;
 }
 
-
+// Si ya inicio sesion, no tiene caso que vea el inicio o el login
 function SoloPublica({ children }) {
-  const { sesion } = useSesion();
-  return sesion ? <Navigate to={rutaInicio(sesion)} replace /> : children;
+  const sesion = obtenerSesion();
+  if (sesion !== null) {
+    return <Navigate to={rutaInicio(sesion)} />;
+  }
+  return children;
 }
 
 export default function App() {
@@ -60,7 +68,7 @@ export default function App() {
         <Route path="perfil" element={<PerfilNegocio />} />
       </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );
 }

@@ -4,6 +4,7 @@ import com.conectaco.conectaco.dto.RecuerdoDTO;
 import com.conectaco.conectaco.dto.RecuerdoRequest;
 import com.conectaco.conectaco.entity.LugarEntity;
 import com.conectaco.conectaco.entity.RecuerdoEntity;
+import com.conectaco.conectaco.entity.TuristaEntity;
 import com.conectaco.conectaco.entity.UsuarioEntity;
 import com.conectaco.conectaco.exception.ApiException;
 import com.conectaco.conectaco.mapper.RecuerdoMapper;
@@ -42,11 +43,12 @@ public class RecuerdoServiceImpl implements RecuerdoService {
 
     @Override
     public List<RecuerdoDTO> listar(Integer idTurista) {
-        String autor = autor(idTurista);
+        String autor = nombreDelTurista(idTurista);
+
         List<RecuerdoDTO> recuerdos = new ArrayList<>();
         for (RecuerdoEntity recuerdo : recuerdoRepository.findByIdTuristaOrderByFechaDescIdRecuerdoDesc(idTurista)) {
-            String lugar = lugarRepository.findById(recuerdo.getIdLugar()).map(LugarEntity::getNombre).orElse("");
-            recuerdos.add(recuerdoMapper.toRecuerdoDTO(recuerdo, lugar, autor));
+            LugarEntity lugar = lugarService.buscar(recuerdo.getIdLugar());
+            recuerdos.add(recuerdoMapper.toRecuerdoDTO(recuerdo, lugar.getNombre(), autor));
         }
         return recuerdos;
     }
@@ -54,7 +56,8 @@ public class RecuerdoServiceImpl implements RecuerdoService {
     @Override
     @Transactional
     public RecuerdoDTO crear(Integer idTurista, RecuerdoRequest request) {
-        String autor = autor(idTurista);
+        String autor = nombreDelTurista(idTurista);
+
         if (request.titulo() == null || request.titulo().isBlank()) {
             throw ApiException.peticionInvalida("Ponle un titulo a tu recuerdo");
         }
@@ -66,7 +69,9 @@ public class RecuerdoServiceImpl implements RecuerdoService {
         }
         LugarEntity lugar = lugarService.buscar(request.idLugar());
 
-        RecuerdoEntity recuerdo = recuerdoRepository.save(recuerdoMapper.toRecuerdoEntity(request, idTurista));
+        RecuerdoEntity recuerdo = recuerdoMapper.toRecuerdoEntity(request, idTurista);
+        recuerdo = recuerdoRepository.save(recuerdo);
+
         actualizarCalificacion(lugar);
         return recuerdoMapper.toRecuerdoDTO(recuerdo, lugar.getNombre(), autor);
     }
@@ -74,14 +79,16 @@ public class RecuerdoServiceImpl implements RecuerdoService {
     @Override
     @Transactional
     public void eliminar(Integer idTurista, Integer idRecuerdo) {
-        RecuerdoEntity recuerdo = recuerdoRepository.findById(idRecuerdo)
-                .filter(r -> r.getIdTurista().equals(idTurista))
-                .orElseThrow(() -> ApiException.noEncontrado("No existe ese recuerdo"));
+        RecuerdoEntity recuerdo = recuerdoRepository.findById(idRecuerdo).orElse(null);
+        if (recuerdo == null || !recuerdo.getIdTurista().equals(idTurista)) {
+            throw ApiException.noEncontrado("No existe ese recuerdo");
+        }
         recuerdoRepository.delete(recuerdo);
-        lugarRepository.findById(recuerdo.getIdLugar()).ifPresent(this::actualizarCalificacion);
+
+        actualizarCalificacion(lugarService.buscar(recuerdo.getIdLugar()));
     }
 
-    // La calificacion del lugar es el promedio de las calificaciones de sus recuerdos
+    // La calificacion de un lugar es el promedio de las calificaciones de sus recuerdos
     private void actualizarCalificacion(LugarEntity lugar) {
         Double promedio = recuerdoRepository.promedioCalificacion(lugar.getIdLugar());
         if (promedio != null) {
@@ -90,10 +97,15 @@ public class RecuerdoServiceImpl implements RecuerdoService {
         }
     }
 
-    private String autor(Integer idTurista) {
-        return turistaRepository.findById(idTurista)
-                .flatMap(t -> usuarioRepository.findById(t.getIdUsuario()))
-                .map(UsuarioEntity::getNombre)
-                .orElseThrow(() -> ApiException.noEncontrado("No existe el turista " + idTurista));
+    private String nombreDelTurista(Integer idTurista) {
+        TuristaEntity turista = turistaRepository.findById(idTurista).orElse(null);
+        if (turista == null) {
+            throw ApiException.noEncontrado("No existe el turista " + idTurista);
+        }
+        UsuarioEntity usuario = usuarioRepository.findById(turista.getIdUsuario()).orElse(null);
+        if (usuario == null) {
+            throw ApiException.noEncontrado("No existe el usuario del turista " + idTurista);
+        }
+        return usuario.getNombre();
     }
 }

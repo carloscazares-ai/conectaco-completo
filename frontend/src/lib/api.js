@@ -1,37 +1,37 @@
-// Cliente para la API de Spring Boot. En desarrollo, Vite manda /v1 al puerto 8080.
+// Funciones para hablar con el backend de Spring Boot.
+// Ejemplo: const lugares = await api.get('/lugares');
 const BASE = '/v1';
 
-async function request(ruta, { method = 'GET', body } = {}) {
-  let respuesta;
-  try {
-    respuesta = await fetch(BASE + ruta, {
-      method,
-      headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-  } catch {
-    throw new Error('No se pudo conectar con el servidor. ¿Está corriendo el backend?');
+async function pedir(ruta, metodo, datos) {
+  const opciones = { method: metodo };
+
+  // Si mandamos datos, van como JSON en el body (igual que en Postman)
+  if (datos !== undefined) {
+    opciones.headers = { 'Content-Type': 'application/json' };
+    opciones.body = JSON.stringify(datos);
   }
 
-  if (respuesta.status === 204) return null;
+  const respuesta = await fetch(BASE + ruta, opciones);
   const texto = await respuesta.text();
-  let datos = null;
-  if (texto) {
-    try {
-      datos = JSON.parse(texto);
-    } catch {
-      datos = null;
-    }
+
+  let json = null;
+  if (texto !== '') {
+    json = JSON.parse(texto);
   }
+
+  // Si el backend respondio con error (400, 404...), lanzamos su mensaje
   if (!respuesta.ok) {
-    throw new Error(datos?.error || `Error ${respuesta.status} del servidor`);
+    if (json !== null && json.error) {
+      throw new Error(json.error);
+    }
+    throw new Error('No se pudo conectar con el servidor. ¿Está corriendo el backend?');
   }
-  return datos;
+  return json;
 }
 
 export const api = {
-  get: (ruta) => request(ruta),
-  post: (ruta, body) => request(ruta, { method: 'POST', body: body ?? {} }),
-  put: (ruta, body) => request(ruta, { method: 'PUT', body }),
-  del: (ruta) => request(ruta, { method: 'DELETE' }),
+  get: (ruta) => pedir(ruta, 'GET'),
+  post: (ruta, datos) => pedir(ruta, 'POST', datos),
+  put: (ruta, datos) => pedir(ruta, 'PUT', datos),
+  del: (ruta) => pedir(ruta, 'DELETE'),
 };

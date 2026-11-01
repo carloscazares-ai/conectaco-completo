@@ -1,18 +1,33 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Eye, ClipboardList, Users, Store, ChevronRight } from 'lucide-react';
+import { Eye, ClipboardList, Users, Store } from 'lucide-react';
 import { api } from '../../lib/api.js';
-import { useApi } from '../../lib/useApi.js';
-import { useSesion } from '../../lib/sesion.jsx';
+import { obtenerSesion } from '../../lib/sesion.js';
 import { numero, zonaDe } from '../../lib/formato.js';
-import { Estado, Estrellas, Imagen, Stat } from '../../components/Piezas.jsx';
+import { Estrellas, Imagen, Stat } from '../../components/Piezas.jsx';
 import Grafica from '../../components/Grafica.jsx';
 
 export default function Dashboard() {
-  const { sesion } = useSesion();
-  const { datos, error, cargando, recargar } = useApi(() => api.get(`/negocios/${sesion.idNegocio}/dashboard`), []);
+  const sesion = obtenerSesion();
+  const [datos, setDatos] = useState(null);
+  const [error, setError] = useState('');
 
-  if (!datos) return <Estado cargando={cargando} error={error} onReintentar={recargar} />;
-  const { lugar } = datos;
+  useEffect(() => {
+    cargar();
+  }, []);
+
+  async function cargar() {
+    try {
+      setDatos(await api.get('/negocios/' + sesion.idNegocio + '/dashboard'));
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  if (error !== '') return <p className="error-form">{error}</p>;
+  if (datos === null) return <p className="cargando">Cargando…</p>;
+
+  const lugar = datos.lugar;
 
   return (
     <div className="pagina">
@@ -23,22 +38,21 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {lugar ? (
+      {lugar !== null ? (
         <Link to="/negocio/establecimiento" className="tarjeta tarjeta-pad" style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
-          <Imagen src={lugar.imagenUrl} alt={lugar.nombre} style={{ width: 120, height: 90, flex: 'none' }} />
-          <div style={{ flex: 1 }}>
-            <h2 style={{ fontSize: 20, fontWeight: 800 }}>{lugar.nombre}</h2>
+          <Imagen src={lugar.imagenUrl} alt={lugar.nombre} style={{ width: 120, height: 90 }} />
+          <div>
+            <h2>{lugar.nombre}</h2>
             <p className="texto-suave">{lugar.categoria} · {zonaDe(lugar.direccion)}</p>
             <Estrellas valor={lugar.calificacionPromedio} opiniones={lugar.opiniones} />
           </div>
-          <ChevronRight color="var(--tinta-tenue)" />
         </Link>
       ) : (
-        <div className="tarjeta tarjeta-pad" style={{ display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="tarjeta tarjeta-pad" style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
           <div className="stat-icono"><Store /></div>
           <div style={{ flex: 1 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 800 }}>Registra tu establecimiento</h2>
-            <p className="texto-suave">Agrega la dirección y los datos de tu negocio para aparecer en el mapa de los turistas.</p>
+            <h2>Registra tu establecimiento</h2>
+            <p className="texto-suave">Agrega tu dirección para aparecer en el mapa de los turistas.</p>
           </div>
           <Link to="/negocio/establecimiento" className="btn btn-primario">Registrar ahora</Link>
         </div>
@@ -51,11 +65,11 @@ export default function Dashboard() {
       </div>
 
       <div className="tarjeta tarjeta-pad">
-        <div className="seccion-titulo" style={{ marginBottom: 12 }}>
-          <h2>Resumen <span className="texto-tenue" style={{ fontWeight: 600 }}>(últimos 30 días)</span></h2>
+        <div className="seccion-titulo">
+          <h2>Resumen (últimos 30 días)</h2>
           <Link to="/negocio/estadisticas">Ver estadísticas</Link>
         </div>
-        <Grafica datos={datos.visitasUltimos30Dias} />
+        <Grafica datos={datos.visitasUltimos30Dias} alto={240} />
       </div>
     </div>
   );

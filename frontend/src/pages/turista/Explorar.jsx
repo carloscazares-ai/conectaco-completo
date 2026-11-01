@@ -1,51 +1,49 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Search, MapPin, Bookmark } from 'lucide-react';
+import { Search, Bookmark } from 'lucide-react';
 import { api } from '../../lib/api.js';
-import { useApi } from '../../lib/useApi.js';
-import { useSesion } from '../../lib/sesion.jsx';
-import { Estado, Estrellas, Imagen, Vacio } from '../../components/Piezas.jsx';
+import { obtenerSesion } from '../../lib/sesion.js';
+import { Estrellas, Imagen, Vacio } from '../../components/Piezas.jsx';
 import Mapa from '../../components/Mapa.jsx';
 
 export default function Explorar() {
-  const { sesion } = useSesion();
-  const [params, setParams] = useSearchParams();
-  const [texto, setTexto] = useState(params.get('q') ?? '');
-  const busqueda = params.get('q') ?? '';
-  const categoria = params.get('categoria') ?? '';
+  const sesion = obtenerSesion();
+  const [parametros] = useSearchParams();
+
+  const [lugares, setLugares] = useState([]);
+  const [categorias, setCategorias] = useState([]);
+  const [error, setError] = useState('');
+  const [texto, setTexto] = useState(parametros.get('q') || '');
+  const [categoria, setCategoria] = useState('');
   const [seleccionado, setSeleccionado] = useState(null);
-  const tarjetas = useRef({});
 
-  const categorias = useApi(() => api.get('/categorias'), []);
-  const lugares = useApi(() => {
-    const filtros = new URLSearchParams({ idTurista: sesion.idTurista });
-    if (busqueda) filtros.set('q', busqueda);
-    if (categoria) filtros.set('categoria', categoria);
-    return api.get(`/lugares?${filtros}`);
-  }, [busqueda, categoria, sesion.idTurista]);
-
-  // Espera medio segundo después de escribir para buscar
+  // Las categorias se cargan una vez, al abrir la pagina
   useEffect(() => {
-    const t = setTimeout(() => {
-      if (texto !== busqueda) {
-        const nuevos = new URLSearchParams(params);
-        if (texto) nuevos.set('q', texto); else nuevos.delete('q');
-        setParams(nuevos, { replace: true });
-      }
-    }, 400);
-    return () => clearTimeout(t);
-  }, [texto, busqueda, params, setParams]);
+    cargarCategorias();
+  }, []);
 
-  const elegirCategoria = (id) => {
-    const nuevos = new URLSearchParams(params);
-    if (id) nuevos.set('categoria', id); else nuevos.delete('categoria');
-    setParams(nuevos, { replace: true });
-  };
+  // Los lugares se vuelven a pedir cada vez que cambia el texto o la categoria
+  useEffect(() => {
+    cargarLugares();
+  }, [texto, categoria]);
 
-  const elegirLugar = (id) => {
-    setSeleccionado(id);
-    tarjetas.current[id]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  };
+  async function cargarCategorias() {
+    try {
+      setCategorias(await api.get('/categorias'));
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function cargarLugares() {
+    try {
+      setLugares(await api.get('/lugares?idTurista=' + sesion.idTurista + '&q=' + texto + '&categoria=' + categoria));
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  if (error !== '') return <p className="error-form">{error}</p>;
 
   return (
     <div className="pagina" style={{ maxWidth: 1400 }}>
@@ -54,56 +52,43 @@ export default function Explorar() {
           <h1>Explorar</h1>
           <p>Encuentra lugares en el mapa y filtra por lo que te gusta.</p>
         </div>
-        <div className="input-icono" style={{ width: 'min(420px, 100%)' }}>
+        <div className="input-icono" style={{ width: 420 }}>
           <Search size={18} />
-          <input className="input" value={texto} onChange={(e) => setTexto(e.target.value)}
-                 placeholder="Buscar en esta zona…" aria-label="Buscar lugares" />
+          <input className="input" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Buscar en esta zona…" />
         </div>
       </div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className={`chip ${!categoria ? 'activo' : ''}`} onClick={() => elegirCategoria('')}>Todos</button>
-        {(categorias.datos ?? []).map((c) => (
-          <button key={c.idCategoria} className={`chip ${categoria === String(c.idCategoria) ? 'activo' : ''}`}
-                  onClick={() => elegirCategoria(String(c.idCategoria))}>{c.nombre}</button>
+        <button className={categoria === '' ? 'chip activo' : 'chip'} onClick={() => setCategoria('')}>Todos</button>
+        {categorias.map((c) => (
+          <button key={c.idCategoria} className={categoria === c.idCategoria ? 'chip activo' : 'chip'}
+                  onClick={() => setCategoria(c.idCategoria)}>{c.nombre}</button>
         ))}
       </div>
 
       <div className="explorar">
         <div className="explorar-lista">
-          {!lugares.datos && <Estado cargando={lugares.cargando} error={lugares.error} onReintentar={lugares.recargar} />}
-          {lugares.datos?.length === 0 && <Vacio icono={MapPin} titulo="No encontramos lugares">Prueba con otra búsqueda o categoría.</Vacio>}
-          {lugares.datos?.map((lugar) => (
-            <div key={lugar.idLugar} ref={(el) => { tarjetas.current[lugar.idLugar] = el; }}
-                 className={`tarjeta lugar-mini ${seleccionado === lugar.idLugar ? 'seleccionado' : ''}`}
-                 onClick={() => setSeleccionado(lugar.idLugar)}>
+          {lugares.length === 0 && <Vacio titulo="No encontramos lugares">Prueba con otra búsqueda o categoría.</Vacio>}
+
+          {lugares.map((lugar) => (
+            <div key={lugar.idLugar} onClick={() => setSeleccionado(lugar.idLugar)}
+                 className={seleccionado === lugar.idLugar ? 'tarjeta lugar-mini seleccionado' : 'tarjeta lugar-mini'}>
               <Imagen src={lugar.imagenUrl} alt={lugar.nombre} />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                  <h3>{lugar.nombre}</h3>
-                  {lugar.favorito && <Bookmark size={16} color="var(--terracota)" fill="var(--terracota)" />}
-                </div>
+              <div style={{ flex: 1 }}>
+                <h3>
+                  {lugar.nombre} {lugar.favorito && <Bookmark size={15} color="#b4532a" fill="#b4532a" />}
+                </h3>
                 <span className="texto-tenue">{lugar.categoria} · {lugar.direccion}</span>
                 <div className="lugar-card-meta">
                   <Estrellas valor={lugar.calificacionPromedio} opiniones={lugar.opiniones} />
-                  <Link to={`/turista/lugares/${lugar.idLugar}`} className="xp" onClick={(e) => e.stopPropagation()}>Ver detalle</Link>
+                  <Link to={'/turista/lugares/' + lugar.idLugar} className="xp">Ver detalle</Link>
                 </div>
               </div>
             </div>
           ))}
         </div>
-        <Mapa
-          lugares={lugares.datos ?? []}
-          seleccionado={seleccionado}
-          onSeleccionar={elegirLugar}
-          popup={(lugar) => (
-            <div>
-              <strong>{lugar.nombre}</strong><br />
-              <span>{lugar.categoria}</span><br />
-              <Link to={`/turista/lugares/${lugar.idLugar}`}>Ver detalle →</Link>
-            </div>
-          )}
-        />
+
+        <Mapa lugares={lugares} seleccionado={seleccionado} onSeleccionar={setSeleccionado} conEnlace />
       </div>
     </div>
   );

@@ -8,9 +8,11 @@ conecTaco es una plataforma digital que conecta a turistas con lugares, activida
 | Parte | Tecnología | Carpeta |
 |---|---|---|
 | Backend (API) | Spring Boot 4 + JPA + MySQL | `backend/` |
-| Frontend | React 18 + Vite + React Router + Leaflet (mapa) | `frontend/` |
+| Frontend | React 18 + Node.js + Vite + React Router + Leaflet (mapa) + Recharts (gráfica) | `frontend/` |
 | Base de datos | MySQL 8 | `database/` |
 | Pruebas de la API | Postman | `postman/` |
+
+**¿Quieres entender cómo funciona?** Lee la [guía para explicar el proyecto](docs/GUIA-PARA-EXPLICAR.md).
 
 ## Base de datos
 

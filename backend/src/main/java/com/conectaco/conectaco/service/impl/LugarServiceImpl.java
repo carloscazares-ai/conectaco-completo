@@ -4,12 +4,7 @@ import com.conectaco.conectaco.dto.CategoriaDTO;
 import com.conectaco.conectaco.dto.LugarDTO;
 import com.conectaco.conectaco.dto.MisionDTO;
 import com.conectaco.conectaco.dto.RecuerdoDTO;
-import com.conectaco.conectaco.entity.CategoriaEntity;
-import com.conectaco.conectaco.entity.LugarEntity;
-import com.conectaco.conectaco.entity.MisionEntity;
-import com.conectaco.conectaco.entity.ProgresoMisionEntity;
-import com.conectaco.conectaco.entity.RecuerdoEntity;
-import com.conectaco.conectaco.entity.VisitaEntity;
+import com.conectaco.conectaco.entity.*;
 import com.conectaco.conectaco.exception.ApiException;
 import com.conectaco.conectaco.mapper.LugarMapper;
 import com.conectaco.conectaco.mapper.MisionMapper;
@@ -19,7 +14,6 @@ import com.conectaco.conectaco.service.LugarService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.text.Normalizer;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -71,28 +65,24 @@ public class LugarServiceImpl implements LugarService {
 
     @Override
     public List<LugarDTO> listar(Integer idCategoria, String busqueda, Integer idTurista) {
-        List<LugarEntity> lugares = idCategoria == null
-                ? lugarRepository.findAllByOrderByCalificacionPromedioDesc()
-                : lugarRepository.findByIdCategoriaOrderByCalificacionPromedioDesc(idCategoria);
+        String texto = busqueda;
+        if (texto != null && texto.isBlank()) {
+            texto = null;
+        }
 
-        String texto = busqueda == null ? "" : normalizar(busqueda);
         List<LugarDTO> resultado = new ArrayList<>();
-        for (LugarEntity lugar : lugares) {
-            if (texto.isEmpty()
-                    || normalizar(lugar.getNombre()).contains(texto)
-                    || normalizar(lugar.getDireccion()).contains(texto)
-                    || normalizar(lugar.getDescripcion()).contains(texto)) {
-                resultado.add(toDTO(lugar, idTurista));
-            }
+        for (LugarEntity lugar : lugarRepository.buscar(idCategoria, texto)) {
+            resultado.add(toDTO(lugar, idTurista));
         }
         return resultado;
     }
 
-    // Ver el detalle cuenta como una visita al perfil del lugar (sirve para las estadisticas del negocio)
+    // Abrir el detalle cuenta como una visita (asi el negocio ve sus estadisticas)
     @Override
     @Transactional
     public LugarDTO detalle(Integer idLugar, Integer idTurista) {
         LugarEntity lugar = buscar(idLugar);
+
         if (idTurista != null && turistaRepository.existsById(idTurista)) {
             VisitaEntity visita = new VisitaEntity();
             visita.setIdLugar(idLugar);
@@ -106,10 +96,13 @@ public class LugarServiceImpl implements LugarService {
     @Override
     public List<MisionDTO> misiones(Integer idLugar, Integer idTurista) {
         LugarEntity lugar = buscar(idLugar);
+
         List<MisionDTO> misiones = new ArrayList<>();
         for (MisionEntity mision : misionRepository.findByIdLugarAndActivaTrue(idLugar)) {
-            ProgresoMisionEntity progreso = idTurista == null ? null
-                    : progresoMisionRepository.findByIdTuristaAndIdMision(idTurista, mision.getIdMision()).orElse(null);
+            ProgresoMisionEntity progreso = null;
+            if (idTurista != null) {
+                progreso = progresoMisionRepository.findByIdTuristaAndIdMision(idTurista, mision.getIdMision()).orElse(null);
+            }
             misiones.add(misionMapper.toMisionDTO(mision, lugar.getNombre(), progreso));
         }
         return misiones;
@@ -118,36 +111,52 @@ public class LugarServiceImpl implements LugarService {
     @Override
     public List<RecuerdoDTO> opiniones(Integer idLugar) {
         LugarEntity lugar = buscar(idLugar);
+
         List<RecuerdoDTO> opiniones = new ArrayList<>();
         for (RecuerdoEntity recuerdo : recuerdoRepository.findByIdLugarOrderByFechaDescIdRecuerdoDesc(idLugar)) {
-            String autor = turistaRepository.findById(recuerdo.getIdTurista())
-                    .flatMap(t -> usuarioRepository.findById(t.getIdUsuario()))
-                    .map(u -> u.getNombre()).orElse("Turista");
-            opiniones.add(recuerdoMapper.toRecuerdoDTO(recuerdo, lugar.getNombre(), autor));
+            opiniones.add(recuerdoMapper.toRecuerdoDTO(recuerdo, lugar.getNombre(), nombreDelTurista(recuerdo.getIdTurista())));
         }
         return opiniones;
     }
 
+    // Junta los datos del lugar con su categoria, opiniones, actividades y si es favorito
     @Override
     public LugarDTO toDTO(LugarEntity lugar, Integer idTurista) {
-        String categoria = categoriaRepository.findById(lugar.getIdCategoria())
-                .map(CategoriaEntity::getNombreCategoria).orElse("");
+        String categoria = "";
+        CategoriaEntity categoriaEntity = categoriaRepository.findById(lugar.getIdCategoria()).orElse(null);
+        if (categoriaEntity != null) {
+            categoria = categoriaEntity.getNombreCategoria();
+        }
+
         long opiniones = recuerdoRepository.findByIdLugarOrderByFechaDescIdRecuerdoDesc(lugar.getIdLugar()).size();
         long actividades = misionRepository.countByIdLugarAndActivaTrue(lugar.getIdLugar());
-        boolean favorito = idTurista != null
-                && favoritoRepository.findByIdTuristaAndIdLugar(idTurista, lugar.getIdLugar()).isPresent();
+
+        boolean favorito = false;
+        if (idTurista != null) {
+            favorito = favoritoRepository.findByIdTuristaAndIdLugar(idTurista, lugar.getIdLugar()).isPresent();
+        }
+
         return lugarMapper.toLugarDTO(lugar, categoria, opiniones, actividades, favorito);
     }
 
     @Override
     public LugarEntity buscar(Integer idLugar) {
-        return lugarRepository.findById(idLugar)
-                .orElseThrow(() -> ApiException.noEncontrado("No existe el lugar " + idLugar));
+        LugarEntity lugar = lugarRepository.findById(idLugar).orElse(null);
+        if (lugar == null) {
+            throw ApiException.noEncontrado("No existe el lugar " + idLugar);
+        }
+        return lugar;
     }
 
-    // Para buscar sin importar mayusculas ni acentos ("cafe" encuentra "Café")
-    private static String normalizar(String texto) {
-        String sinAcentos = Normalizer.normalize(texto, Normalizer.Form.NFD).replaceAll("\\p{M}", "");
-        return sinAcentos.toLowerCase().trim();
+    private String nombreDelTurista(Integer idTurista) {
+        TuristaEntity turista = turistaRepository.findById(idTurista).orElse(null);
+        if (turista == null) {
+            return "Turista";
+        }
+        UsuarioEntity usuario = usuarioRepository.findById(turista.getIdUsuario()).orElse(null);
+        if (usuario == null) {
+            return "Turista";
+        }
+        return usuario.getNombre();
     }
 }
